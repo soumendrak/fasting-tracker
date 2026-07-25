@@ -75,6 +75,12 @@ details summary{cursor:pointer; color:var(--muted); padding:6px 0}
   padding:12px 20px; border-radius:12px; font-weight:700; z-index:20; animation:fade 3s forwards}
 @keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
 label.lbl{display:block; font-size:13px; color:var(--muted); margin:10px 0 4px}
+.hero{text-align:center; background:linear-gradient(160deg,var(--accent-dim),var(--card)); border-color:var(--accent)}
+.hero-badge{font-size:40px; line-height:1}
+.hero-title{font-size:22px; font-weight:700; color:var(--text); text-transform:none; letter-spacing:0; margin:8px 0 6px}
+.hero-sub{color:var(--muted); font-size:14px; margin-bottom:12px; line-height:1.45}
+.hero-feats{display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin-bottom:12px}
+.hero-feats span{background:var(--card2); border:1px solid var(--line); border-radius:20px; padding:6px 12px; font-size:13px}
 </style>
 </head>
 <body>
@@ -82,6 +88,16 @@ label.lbl{display:block; font-size:13px; color:var(--muted); margin:10px 0 4px}
 <main>
 
 <section id="tab-timer" class="active">
+  <div class="card hero" id="welcome" hidden>
+    <div class="hero-badge">⏳</div>
+    <h2 class="hero-title">Welcome to FastTrack</h2>
+    <p class="hero-sub">Track your fasts and weight — and see where you're headed. Everything stays private on this device.</p>
+    <div class="hero-feats">
+      <span>🔥 Timer &amp; streaks</span><span>📈 Weight projection</span>
+      <span>💧 Water &amp; metrics</span><span>📴 Works offline</span>
+    </div>
+    <p class="hero-sub" style="margin-bottom:0">Pick a plan below and tap <b>Start fast</b> to begin.</p>
+  </div>
   <div class="chips" id="presets"></div>
   <div id="ring-wrap">
     <svg viewBox="0 0 200 200">

@@ -1,4 +1,4 @@
-const CACHE = 'fasttrack-v1';
+const CACHE = 'fasttrack-v2';
 const ASSETS = ['./', 'index.html', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', e => {
@@ -8,6 +8,16 @@ self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys =>
     Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
+// stale-while-revalidate: serve cache instantly, refresh it in the background so
+// the next load is always current — no version bump needed per deploy.
 self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  if (e.request.method !== 'GET') return;
+  e.respondWith(caches.open(CACHE).then(async cache => {
+    const cached = await cache.match(e.request);
+    const network = fetch(e.request).then(res => {
+      if (res.ok) cache.put(e.request, res.clone());
+      return res;
+    }).catch(() => cached);
+    return cached || network;
+  }));
 });

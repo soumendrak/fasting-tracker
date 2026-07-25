@@ -315,6 +315,7 @@ $('#import-file').onchange = async e => {
 
 // ---------- boot ----------
 function renderAll() {
+  $('#welcome').hidden = db.fasts.length > 0 || db.weights.length > 0;
   renderPresets(); tick(); renderHistory(); renderStreak();
   $('#w-date').value = today();
   $('#w-goal').value = db.settings.goalWeight ?? '';
