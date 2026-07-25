@@ -6,7 +6,7 @@ self.addEventListener('install', e => {
 });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+    Promise.all(keys.filter(k => k.startsWith('fasttrack-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 // stale-while-revalidate: serve cache instantly, refresh it in the background so
 // the next load is always current — no version bump needed per deploy.

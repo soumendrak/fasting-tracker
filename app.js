@@ -25,6 +25,10 @@ const fmtDur = ms => {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 };
 const fmtDay = ds => new Date(ds + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// day integer <-> 'YYYY-MM-DD', both anchored at UTC midnight so display is stable across timezones
+const dayNum = ds => Math.round(new Date(ds + 'T00:00:00Z').getTime() / DAY);
+const numDay = x => new Date(Math.round(x) * DAY).toISOString().slice(0, 10);
 const toast = msg => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 3000); };
 const activeFast = () => db.fasts.find(f => !f.end);
 
@@ -106,7 +110,7 @@ $('#fast-btn').onclick = () => {
   } else {
     db.fasts.push({ start: Date.now(), end: null, goal: db.settings.goal });
   }
-  save(); tick(); renderHistory(); renderStreak();
+  save(); tick(); renderHistory(); renderStreak(); refreshWelcome();
 };
 $('#edit-start').onchange = e => {
   const f = activeFast(); const t = new Date(e.target.value).getTime();
@@ -136,7 +140,7 @@ $('#past-add').onclick = () => {
   if (!s || !e || e <= s) return toast('Pick a valid start & end');
   db.fasts.push({ start: s, end: e, goal: db.settings.goal });
   $('#past-start').value = $('#past-end').value = '';
-  save(); renderHistory(); renderStreak(); toast('Past fast logged');
+  save(); renderHistory(); renderStreak(); refreshWelcome(); toast('Past fast logged');
 };
 
 function renderStreak() {
@@ -166,33 +170,39 @@ function renderWeight() {
   const ws = [...db.weights].sort((a, b) => a.date < b.date ? -1 : 1);
 
   $('#w-list').innerHTML = ws.length ? [...ws].reverse().slice(0, 30).map(w =>
-    `<li><span><b>${w.val}</b> ${unit}</span><span class="sub">${fmtDay(w.date)}
+    `<li><span><b>${esc(w.val)}</b> ${esc(unit)}</span><span class="sub">${fmtDay(w.date)}
      <button class="del" data-del-w="${w.date}">✕</button></span></li>`).join('')
     : '<li class="sub">No entries yet.</li>';
   $$('[data-del-w]').forEach(b => b.onclick = () => {
     db.weights = db.weights.filter(w => w.date !== b.dataset.delW); save(); renderWeight();
   });
 
-  // projection from last 30 entries
-  const pts = ws.map(w => [new Date(w.date).getTime() / DAY, w.val]);
+  // projection: fit a line over the last 30 weigh-ins, forecast forward from today
+  const pts = ws.map(w => [dayNum(w.date), w.val]);
   const fit = regression(pts.slice(-30));
   const PROJ_DAYS = 30;
   let projPts = [];
   if (fit) {
+    const at = x => fit.intercept + fit.slope * x;
     const lastX = pts[pts.length - 1][0];
-    for (let i = 0; i <= PROJ_DAYS; i += 5) projPts.push([lastX + i, fit.intercept + fit.slope * (lastX + i)]);
+    const todayX = dayNum(today());
+    const anchorX = Math.max(todayX, lastX);   // don't project into the past if last entry is stale
+    const endX = anchorX + PROJ_DAYS;
+    // draw the dashed line from the last real point through the forecast horizon
+    for (let x = lastX; x <= endX; x += Math.max(1, (endX - lastX) / 8)) projPts.push([x, at(x)]);
+    projPts.push([endX, at(endX)]);
     const wkRate = fit.slope * 7;
-    const endW = projPts[projPts.length - 1][1];
-    let txt = `Trend: <b>${wkRate >= 0 ? '+' : ''}${wkRate.toFixed(2)} ${unit}/week</b>. ` +
-      `In ${PROJ_DAYS} days: <b>~${endW.toFixed(1)} ${unit}</b>.`;
+    let txt = `Trend: <b>${wkRate >= 0 ? '+' : ''}${wkRate.toFixed(2)} ${esc(unit)}/week</b>. ` +
+      `In ${PROJ_DAYS} days: <b>~${at(endX).toFixed(1)} ${esc(unit)}</b>.`;
     const goal = db.settings.goalWeight;
     if (goal && fit.slope !== 0) {
-      const cur = pts[pts.length - 1][1];
-      const daysToGoal = (goal - (fit.intercept + fit.slope * lastX)) / fit.slope;
-      if ((goal < cur) === (fit.slope < 0) && daysToGoal > 0 && daysToGoal < 3650) {
-        txt += ` At this rate you'll hit <b>${goal} ${unit}</b> around <b>${new Date((lastX + daysToGoal) * DAY).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</b> 🎯`;
+      const daysToGoal = (goal - at(anchorX)) / fit.slope;
+      if (daysToGoal > 0 && daysToGoal < 3650) {
+        const when = new Date(numDay(anchorX + daysToGoal) + 'T12:00')
+          .toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        txt += ` At this rate you'll hit <b>${esc(goal)} ${esc(unit)}</b> around <b>${when}</b> 🎯`;
       } else {
-        txt += ` Current trend is moving away from your ${goal} ${unit} goal.`;
+        txt += ` Current trend is moving away from your ${esc(goal)} ${esc(unit)} goal.`;
       }
     }
     $('#w-proj').innerHTML = txt;
@@ -216,7 +226,7 @@ function chartSVG(pts, projPts, goal) {
   const dots = pts.slice(-60).map(p => `<circle class="dot" cx="${X(p[0]).toFixed(1)}" cy="${Y(p[1]).toFixed(1)}" r="2.5"/>`).join('');
   const goalLine = goal ? `<line x1="${P}" x2="${W - P}" y1="${Y(goal)}" y2="${Y(goal)}" stroke="var(--muted)" stroke-dasharray="2 3"/>
     <text x="${W - P}" y="${Y(goal) - 3}" text-anchor="end">goal ${goal}</text>` : '';
-  const fmt = x => new Date(x * DAY).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const fmt = x => fmtDay(numDay(x));
   return `<svg class="chart" viewBox="0 0 ${W} ${H}">
     <line class="axis" x1="${P}" y1="${H - P}" x2="${W - P}" y2="${H - P}"/>
     <text x="${P}" y="${H - P + 12}">${fmt(x0)}</text>
@@ -236,7 +246,7 @@ $('#w-add').onclick = () => {
   db.weights = db.weights.filter(w => w.date !== date); // one entry per day
   db.weights.push({ date, val });
   $('#w-val').value = '';
-  save(); renderWeight(); toast('Weight logged');
+  save(); renderWeight(); refreshWelcome(); toast('Weight logged');
 };
 $('#w-goal').onchange = e => { db.settings.goalWeight = parseFloat(e.target.value) || null; save(); renderWeight(); };
 
@@ -259,7 +269,7 @@ $('#m-type').innerHTML = M_TYPES.map(t => `<option>${t}</option>`).join('');
 function renderMeasurements() {
   const ms = [...db.measurements].reverse().slice(0, 20);
   $('#m-list').innerHTML = ms.length ? ms.map((m, i) =>
-    `<li><span><b>${m.val}</b> <span class="sub">${m.type}</span></span>
+    `<li><span><b>${esc(m.val)}</b> <span class="sub">${esc(m.type)}</span></span>
      <span class="sub">${fmtDay(m.date)} <button class="del" data-del-m="${db.measurements.length - 1 - i}">✕</button></span></li>`).join('')
     : '<li class="sub">Nothing logged yet.</li>';
   $$('[data-del-m]').forEach(b => b.onclick = () => {
@@ -278,7 +288,7 @@ $('#m-add').onclick = () => {
 function renderNotes() {
   const ns = [...db.notes].reverse().slice(0, 20);
   $('#note-list').innerHTML = ns.map(n =>
-    `<li><span style="flex:1">${n.text.replace(/</g, '&lt;')}</span>
+    `<li><span style="flex:1">${esc(n.text)}</span>
      <span class="sub">${fmtDay(localDate(n.ts))} <button class="del" data-del-n="${n.ts}">✕</button></span></li>`).join('');
   $$('[data-del-n]').forEach(b => b.onclick = () => {
     db.notes = db.notes.filter(n => n.ts !== +b.dataset.delN); save(); renderNotes();
@@ -304,18 +314,50 @@ $('#export-btn').onclick = () => {
   a.click();
 };
 $('#import-btn').onclick = () => $('#import-file').click();
+// coerce an untrusted parsed backup into a known-good shape; throws if it isn't one
+function sanitizeBackup(d) {
+  if (!d || typeof d !== 'object' || !Array.isArray(d.fasts) || !Array.isArray(d.weights)) throw new Error('bad file');
+  const num = v => { const n = +v; return Number.isFinite(n) ? n : null; };
+  const s = d.settings || {};
+  return {
+    fasts: d.fasts.filter(f => f && num(f.start) != null).map(f => ({
+      start: +f.start, end: num(f.end), goal: num(f.goal) || 16,
+    })),
+    weights: d.weights.filter(w => w && typeof w.date === 'string' && num(w.val) != null)
+      .map(w => ({ date: w.date.slice(0, 10), val: +w.val })),
+    water: (d.water && typeof d.water === 'object' && !Array.isArray(d.water)) ? Object.fromEntries(
+      Object.entries(d.water).filter(([k, v]) => num(v) != null).map(([k, v]) => [String(k).slice(0, 10), +v])) : {},
+    measurements: Array.isArray(d.measurements) ? d.measurements.filter(m => m && num(m.val) != null)
+      .map(m => ({ date: String(m.date || '').slice(0, 10), type: String(m.type || '').slice(0, 40), val: +m.val })) : [],
+    notes: Array.isArray(d.notes) ? d.notes.filter(n => n && num(n.ts) != null)
+      .map(n => ({ ts: +n.ts, text: String(n.text || '').slice(0, 2000) })) : [],
+    settings: {
+      goal: num(s.goal) || 16,
+      unit: s.unit === 'lb' ? 'lb' : 'kg',
+      waterGoal: num(s.waterGoal) || 2000,
+      goalWeight: num(s.goalWeight),
+    },
+  };
+}
 $('#import-file').onchange = async e => {
+  const prev = db;
   try {
-    const data = JSON.parse(await e.target.files[0].text());
-    if (!Array.isArray(data.fasts)) throw new Error('bad file');
-    db = { ...DEFAULTS, ...data }; db.settings = { ...DEFAULTS.settings, ...data.settings };
-    save(); renderAll(); toast('Data imported');
-  } catch { toast('Import failed: not a FastTrack backup'); }
+    db = sanitizeBackup(JSON.parse(await e.target.files[0].text()));
+    renderAll();              // render first: if it throws, nothing was persisted
+    save();
+    toast('Data imported');
+  } catch {
+    db = prev; renderAll();   // roll back to the previous good state
+    toast('Import failed: not a FastTrack backup');
+  } finally {
+    e.target.value = '';      // allow re-importing the same file
+  }
 };
 
 // ---------- boot ----------
+const refreshWelcome = () => { $('#welcome').hidden = db.fasts.length > 0 || db.weights.length > 0; };
 function renderAll() {
-  $('#welcome').hidden = db.fasts.length > 0 || db.weights.length > 0;
+  refreshWelcome();
   renderPresets(); tick(); renderHistory(); renderStreak();
   $('#w-date').value = today();
   $('#w-goal').value = db.settings.goalWeight ?? '';
