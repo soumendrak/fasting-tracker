@@ -60,3 +60,7 @@ Your fasts, weight, water, measurements, and notes never leave your device. Data
 ## 🛠️ Tech
 
 Pure HTML, CSS, and vanilla JavaScript — no framework, no build step, no runtime dependencies. Offline support via a stale-while-revalidate service worker.
+
+## Sponsor
+
+If this project helps you, consider [sponsoring my work on GitHub](https://github.com/sponsors/soumendrak). Your support helps fund maintenance, documentation, and continued development.
